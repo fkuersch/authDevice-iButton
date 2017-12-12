@@ -1,186 +1,164 @@
-#include <Arduino.h>
+#include "main.h"
+#include "hdlc_commands.h"
 
-#include <OneWire.h>
-
+#define DEVICE_ID 1
 
 #define RELAY_ON_TIME 4000
-#define OFF_TIME 3000
-#define READ_DELAY 5
-
-#define SERIAL_LENGTH 6
-
-#define CODE_NO_INPUT 0
-#define CODE_INVALID_CRC 1
-#define CODE_INVALID_FAMILY 2
-#define CODE_SUCCESS 3
 
 #define PIN_RELAY 13
 #define PIN_1WIRE 6
+#define PIN_TX 1
 
-OneWire  ds(PIN_1WIRE);
-byte addr[1 + SERIAL_LENGTH + 1];  // 8 bit CRC, 48 bit serial number, 8 bit family code
+#define IBUTTON_SEARCH_INTERVAL 50
+#define IBUTTON_KEEP_INTERVAL 2000  // fotget ibutton after xx ms if not present anymore
 
-byte valid_key[SERIAL_LENGTH] = {0xa3, 0x78, 0x69, 0x00, 0x00, 0x00};
+int hdlc_read_byte();
+void hdlc_write_byte(uint8_t data);
+void hdlc_message_handler(uint8_t *data, uint16_t length);
 
-byte get_key_code(byte *key);
-bool is_valid(byte key[8]);
+HDLC<hdlc_read_byte, hdlc_write_byte, 16, CRC16_CCITT> hdlc;
+IButtonReader ibutton_reader(PIN_1WIRE, IBUTTON_SEARCH_INTERVAL, IBUTTON_KEEP_INTERVAL);
+
+unsigned long previous_millis;
+
+unsigned long relay_on_millis = 0;
+bool relay_state = false;
+
+void hdlc_write_byte(uint8_t data) {
+    Serial1.write(data);
+}
+
+int hdlc_read_byte() {
+    return Serial1.read();
+}
+
+void hdlc_receive() {
+    if(hdlc.receive() != 0U) {
+        uint8_t buff[hdlc.RXBFLEN];
+        uint16_t size = hdlc.copyReceivedMessage(buff);
+        hdlc_message_handler(buff, size);
+    }
+}
+
+void hdlc_message_handler(uint8_t *data, uint16_t length) {
+    debug_print("message(");
+    debug_print(length);
+    debug_print("): ");
+    for(byte i = 0; i < length; i++) {
+        debug_print(data[i], HEX);
+    }
+    debug_println("");
+    if(length < 3) {
+        debug_println("too short");
+        return;
+    }
+    if(data[0] != PROTOCOL_VERSION) {
+        debug_println("invalid protocol");
+        return;
+    }
+    if(data[1] != DEVICE_ID) {
+        debug_println("invalid device id");
+        return;
+    }
+    switch(data[2]) {
+        case COMMAND_PING:
+            if(length != sizeof(CommandPing) + 2) {
+                debug_println("invalid command length");
+                return;
+            }
+            debug_println("ping");
+            hdlc_handle_ping((CommandPing *) &data[2]);
+            break;
+        case COMMAND_GET_STATUS:
+            if(length != sizeof(CommandGetStatus) + 2) {
+                debug_println("invalid command length");
+                return;
+            }
+            debug_println("get status");
+            hdlc_handle_get_status((CommandGetStatus *) &data[2]);
+            break;
+        case COMMAND_UNLOCK_DOOR:
+            if(length != sizeof(CommandUnlockDoor) + 2) {
+                debug_println("invalid command length");
+                return;
+            }
+            debug_println("unlock door");
+            hdlc_handle_unlock_door((CommandUnlockDoor *) &data[2]);
+            break;
+        default:
+            debug_println("invalid command");
+    }
+}
+
+void hdlc_transmit_response(void *response, size_t length) {
+    hdlc.transmitStart();
+    hdlc.transmitByte(PROTOCOL_VERSION);
+    hdlc.transmitByte(DEVICE_ID);
+    hdlc.transmitBytes(response, length);
+    hdlc.transmitEnd();
+}
+
+void hdlc_handle_ping(CommandPing *command) {
+    ResponsePong response;
+    memcpy(response.pong_data, command->ping_data, sizeof(command->ping_data));
+    hdlc_transmit_response(&response, sizeof(response));
+}
+
+void hdlc_handle_get_status(CommandGetStatus *command) {
+    ResponseStatus response;
+    response.ibutton_available = ibutton_reader.ibutton_is_available;
+    response.family_code = ibutton_reader.family_code;
+    memcpy(&response.serial_number, &ibutton_reader.serial_number, sizeof(ibutton_reader.serial_number));
+    hdlc_transmit_response(&response, sizeof(response));
+}
+
+void hdlc_handle_unlock_door(CommandUnlockDoor *command) {
+    ResponseUnlockDoor response;
+    debug_println("relay on");
+    relay_state = true;
+    digitalWrite(PIN_RELAY, HIGH);
+    relay_on_millis = millis();
+    hdlc_transmit_response(&response, sizeof(response));
+}
 
 
 void setup(void) {
-    Serial.begin(9600);
     pinMode(PIN_RELAY, OUTPUT);
-    digitalWrite(PIN_RELAY, HIGH);
+    digitalWrite(PIN_RELAY, LOW);
+
+    pinMode(PIN_TX, OUTPUT); // Serial port TX to output
+    Serial1.begin(9600);
+
+    debug_init();
+    debug_println("starting");
 }
 
 void loop(void) {
-    byte input_key[SERIAL_LENGTH];
-    byte result_code = get_key_code(input_key);
+    hdlc_receive();
+    ibutton_reader.update();
 
-    if(result_code == CODE_SUCCESS) {
-        byte i;
-        for(i = SERIAL_LENGTH; i > 0; i--) {
-            Serial.print(" ");
-            Serial.print(input_key[i-1], HEX);
-        }
-        Serial.println("");
-        if(is_valid(input_key)) {
-            Serial.println("valid key");
-            digitalWrite(PIN_RELAY, LOW);
-            delay(RELAY_ON_TIME);
-            digitalWrite(PIN_RELAY, HIGH);
-            delay(OFF_TIME);
-        } else {
-            Serial.println("invalid key");
+    unsigned long current_millis = millis();
+    if (current_millis - previous_millis >= 100) {
+        previous_millis = current_millis;
+        if (ibutton_reader.ibutton_is_available) {
+            debug_print("serial number: ");
+            byte i;
+            for (i = 0; i < SERIAL_NUMBER_LENGTH; i++) {
+                debug_print(ibutton_reader.serial_number[i], HEX);
+                debug_print(" ");
+            }
+            debug_print("  family code: 0x");
+            debug_println(ibutton_reader.family_code, HEX);
         }
     }
-    else if (result_code == CODE_INVALID_CRC) {
-        Serial.println("invalid crc");
-    }
-    else if (result_code == CODE_INVALID_FAMILY) {
-        Serial.println("invalid family");
-    }
 
-    delay(READ_DELAY);
-}
-
-byte get_key_code(byte *key) {
-    if ( !ds.search(addr)) {
-        ds.reset_search();
-        return CODE_NO_INPUT;
-    }
-
-    // check crc
-    if ( OneWire::crc8( addr, 7) != addr[7]) {
-        return CODE_INVALID_CRC;
-    }
-
-    // check family code
-    if ( addr[0] != 0x18) {
-        return CODE_INVALID_FAMILY;
-    }
-
-//    ds.reset();
-//    ds.reset_search();
-    memcpy(key, addr + 1*sizeof(byte), SERIAL_LENGTH * sizeof(byte));
-
-    /*
-    // READ MEMORY
-    ds.write(0xf0); // read memory command
-    ds.write(0x00); // TA1
-    ds.write(0x00); // TA2
-
-#define BUF_LEN (32*22)
-    uint8_t buf[BUF_LEN];
-    ds.read_bytes(buf, BUF_LEN);
-    int i = 0;
-    while(i < BUF_LEN) {
-        Serial.print("0x");
-        Serial.print(i, HEX);
-        Serial.print(" to 0x");
-        Serial.print(i+31, HEX);
-        Serial.print(":");
-        int j;
-        for(j = 0; j < 32; j++) {
-            Serial.print(" 0x");
-            Serial.print(buf[i++], HEX);
+    if(relay_state) {
+        digitalWrite(PIN_RELAY, HIGH);
+        if(current_millis - relay_on_millis >= RELAY_ON_TIME) {
+            debug_println("relay off");
+            relay_state = false;
         }
-        Serial.println();
+    } else {
+        digitalWrite(PIN_RELAY, LOW);
     }
-*/
-
-    // read PRNG counter
-    ds.write(0xf0); // read memory command
-    ds.write(0xa0); // TA1
-    ds.write(0x02); // TA2
-
-    uint8_t buf[4];
-    ds.read_bytes(buf, 4);
-    Serial.print("PRNG counter:");
-    int j;
-    for(j = 0; j < 4; j++) {
-        Serial.print(" 0x");
-        Serial.print(buf[j], HEX);
-    }
-    Serial.println();
-
-
-    ds.reset();
-
-    ds.write(0xa5); // resume
-
-    // compute challenge
-    uint8_t commands[4];
-    commands[0] = 0x33; // compute SHA
-    commands[1] = 0xa0; // TA1
-    commands[2] = 0x02; // TA2
-    commands[3] = 0x33; // compute challenge
-    ds.write_bytes(commands, 4);
-    uint8_t crc_buf[2];
-    ds.read_bytes(crc_buf, 2); // read CRC
-
-    Serial.print("read crc: ");
-    uint16_t crc16_buf = (uint16_t) crc_buf[0];
-    crc16_buf = (crc16_buf << 8) + (uint16_t)  crc_buf[1];
-    Serial.println(crc16_buf, HEX);
-    Serial.println();
-
-    if(!OneWire::check_crc16(commands, 4, crc_buf)) {
-        Serial.print("CRC check failed");
-        ds.reset();
-        return CODE_INVALID_CRC;
-    }
-    Serial.println("CRC check succeeded");
-
-
-
-    ds.reset();
-
-    ds.write(0xa5); // resume
-
-    // read PRNG counter
-    ds.write(0xf0); // read memory
-    ds.write(0xa0); // TA1
-    ds.write(0x02); // TA2
-    ds.read_bytes(buf, 4);
-    Serial.print("PRNG counter:");
-    for(j = 0; j < 4; j++) {
-        Serial.print(" 0x");
-        Serial.print(buf[j], HEX);
-    }
-    Serial.println();
-
-
-    ds.reset();
-
-    return CODE_SUCCESS;
-}
-
-bool is_valid(byte key[8]) {
-    // TODO: read from sd card
-
-    if (memcmp(key, valid_key, SERIAL_LENGTH) == 0) {
-        return true;
-    }
-
-    return false;
 }
