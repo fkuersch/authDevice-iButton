@@ -1,5 +1,4 @@
 #include "main.h"
-#include "hdlc_commands.h"
 
 #define DEVICE_ID 1
 
@@ -127,7 +126,7 @@ void setup(void) {
     digitalWrite(PIN_RELAY, LOW);
 
     pinMode(PIN_TX, OUTPUT); // Serial port TX to output
-    Serial1.begin(9600);
+    Serial1.begin(115200);
 
     debug_init();
     debug_println("starting");
