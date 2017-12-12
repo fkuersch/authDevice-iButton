@@ -3,3 +3,4 @@
 CMakeListsPrivate.txt
 
 .idea
+.DS_Store
