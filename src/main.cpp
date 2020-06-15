@@ -1,15 +1,25 @@
 #include "main.h"
 
-#define DEVICE_ID 1
+#define DEVICE_ID 0
 
-#define RELAY_ON_TIME 4000
+#define RELAY_ON_TIME 2000
+#define LED_ON_TIME 5000
 
-#define PIN_RELAY 13
-#define PIN_1WIRE 6
+#define PIN_RELAY 10
+#define PIN_1WIRE 15
 #define PIN_TX 1
+#define PIN_DE 3
+#define PIN_RE 2
+#define PIN_LED_RED A2
+#define PIN_LED_GREEN A3
+
+#define LED_STATE_OFF 0
+#define LED_STATE_GREEN 1
+#define LED_STATE_RED 2
 
 #define IBUTTON_SEARCH_INTERVAL 50
 #define IBUTTON_KEEP_INTERVAL 2000  // fotget ibutton after xx ms if not present anymore
+
 
 int hdlc_read_byte();
 void hdlc_write_byte(uint8_t data);
@@ -22,6 +32,10 @@ unsigned long previous_millis;
 
 unsigned long relay_on_millis = 0;
 bool relay_state = false;
+
+unsigned long led_on_millis = 0;
+byte led_state = LED_STATE_OFF;
+
 
 void hdlc_write_byte(uint8_t data) {
     Serial1.write(data);
@@ -84,17 +98,30 @@ void hdlc_message_handler(uint8_t *data, uint16_t length) {
             debug_println("unlock door");
             hdlc_handle_unlock_door((CommandUnlockDoor *) &data[2]);
             break;
+        case COMMAND_REJECT_KEY:
+            if(length != sizeof(CommandRejectKey) + 2) {
+                debug_println("invalid command length");
+                return;
+            }
+            debug_println("reject key");
+            hdlc_handle_reject_key((CommandRejectKey *) &data[2]);
+            break;
         default:
             debug_println("invalid command");
     }
 }
 
 void hdlc_transmit_response(void *response, size_t length) {
+    digitalWrite(PIN_DE, HIGH);
+    digitalWrite(PIN_RE, HIGH);
     hdlc.transmitStart();
     hdlc.transmitByte(PROTOCOL_VERSION);
     hdlc.transmitByte(DEVICE_ID);
     hdlc.transmitBytes(response, length);
     hdlc.transmitEnd();
+    Serial1.flush();
+    digitalWrite(PIN_DE, LOW);
+    digitalWrite(PIN_RE, LOW);
 }
 
 void hdlc_handle_ping(CommandPing *command) {
@@ -112,20 +139,47 @@ void hdlc_handle_get_status(CommandGetStatus *command) {
 }
 
 void hdlc_handle_unlock_door(CommandUnlockDoor *command) {
-    ResponseUnlockDoor response;
     debug_println("relay on");
     relay_state = true;
     digitalWrite(PIN_RELAY, HIGH);
     relay_on_millis = millis();
+
+    debug_println("green led on");
+    led_state = LED_STATE_GREEN;
+    digitalWrite(PIN_LED_RED, LOW);
+    digitalWrite(PIN_LED_GREEN, HIGH);
+    led_on_millis = millis();
+
+    ResponseUnlockDoor response;
+    hdlc_transmit_response(&response, sizeof(response));
+}
+
+void hdlc_handle_reject_key(CommandRejectKey *command) {
+    debug_println("red led on");
+    led_state = LED_STATE_RED;
+    digitalWrite(PIN_LED_GREEN, LOW);
+    digitalWrite(PIN_LED_RED, HIGH);
+    led_on_millis = millis();
+
+    ResponseRejectKey response;
     hdlc_transmit_response(&response, sizeof(response));
 }
 
 
 void setup(void) {
     pinMode(PIN_RELAY, OUTPUT);
-    digitalWrite(PIN_RELAY, LOW);
+    pinMode(PIN_DE, OUTPUT);
+    pinMode(PIN_RE, OUTPUT);
+    pinMode(PIN_LED_GREEN, OUTPUT);
+    pinMode(PIN_LED_RED, OUTPUT);
+    pinMode(PIN_TX, OUTPUT);
 
-    pinMode(PIN_TX, OUTPUT); // Serial port TX to output
+    digitalWrite(PIN_RELAY, LOW);
+    digitalWrite(PIN_DE, LOW);
+    digitalWrite(PIN_RE, LOW);
+    digitalWrite(PIN_LED_GREEN, LOW);
+    digitalWrite(PIN_LED_RED, LOW);
+
     Serial1.begin(115200);
 
     debug_init();
@@ -159,5 +213,21 @@ void loop(void) {
         }
     } else {
         digitalWrite(PIN_RELAY, LOW);
+    }
+
+    if(led_state == LED_STATE_GREEN || led_state == LED_STATE_RED) {
+        if(led_state == LED_STATE_GREEN) {
+            digitalWrite(PIN_LED_GREEN, HIGH);
+        }
+        if(led_state == LED_STATE_RED) {
+            digitalWrite(PIN_LED_RED, HIGH);
+        }
+        if(current_millis - led_on_millis >= LED_ON_TIME) {
+            debug_println("led off");
+            led_state = LED_STATE_OFF;
+        }
+    } else {
+        digitalWrite(PIN_LED_GREEN, LOW);
+        digitalWrite(PIN_LED_RED, LOW);
     }
 }

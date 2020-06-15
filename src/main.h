@@ -25,6 +25,7 @@
 void hdlc_handle_ping(CommandPing *command);
 void hdlc_handle_get_status(CommandGetStatus *command);
 void hdlc_handle_unlock_door(CommandUnlockDoor *command);
+void hdlc_handle_reject_key(CommandRejectKey *command);
 
 
 #endif //IBUTTON_SCHLIESSSYSTEM_MAIN_H

@@ -7,7 +7,8 @@
 enum hdlc_commands {
     COMMAND_PING = 0,
     COMMAND_GET_STATUS,
-    COMMAND_UNLOCK_DOOR
+    COMMAND_UNLOCK_DOOR,
+    COMMAND_REJECT_KEY
 };
 
 typedef struct {
@@ -23,10 +24,15 @@ typedef struct {
     uint8_t command_type = COMMAND_UNLOCK_DOOR;
 } CommandUnlockDoor;
 
+typedef struct {
+    uint8_t command_type = COMMAND_REJECT_KEY;
+} CommandRejectKey;
+
 enum hdlc_responses {
     RESPONSE_PONG = 0,
     RESPONSE_STATUS,
-    RESPONSE_UNLOCK_DOOR
+    RESPONSE_UNLOCK_DOOR,
+    RESPONSE_REJECT_KEY
 };
 
 typedef struct {
@@ -44,6 +50,10 @@ typedef struct {
 typedef struct {
     uint8_t response_type = RESPONSE_UNLOCK_DOOR;
 } ResponseUnlockDoor;
+
+typedef struct {
+    uint8_t response_type = RESPONSE_REJECT_KEY;
+} ResponseRejectKey;
 
 
 #endif //IBUTTON_SCHLIESSSYSTEM_HDLC_COMMANDS_H
