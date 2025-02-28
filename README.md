@@ -10,6 +10,8 @@ Auf den Endgeräten werden keine sensitiven Daten dauerhaft gespeichert.
 
 Achtung: Pinbelegung und Relais-Timing sind für die obere Eingangstür anders als bei den Hauseingangstüren unten!
 
+Weitere Doku + Pinbelegung: [Scans](doc/schliessystem-scans.pdf)
+
 ## HDLC-Commands
 
 | Command           | Response           | Funktion                                                     |
