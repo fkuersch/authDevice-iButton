@@ -4,7 +4,7 @@ Die Endgeräte an den Türen bestehen aus je einem Arduino, der per RS485 (+ Str
 
 Der Arduino motitort kontinuierlich den 1Wire-Bus, um nach neuen iButtons zu suchen, nimmt aber ungefragt nie Kontakt mit dem Pi auf. Der Pi fragt pollt kontinuierlich (ca. alle 50ms) den Arduino im [HDLC](https://de.wikipedia.org/wiki/High-Level_Data_Link_Control)-Format, der in jedem Fall darauf antwortet. So kann der Pi schnell erkennen, wenn die Verbindung unterbrochen wurde.
 
-Jedes Endgerät hat eine eigene DEVICE_ID und reagiert nicht, wenn es mit der falschen ID angesprochen wurde.
+Jedes Endgerät hat eine eigene DEVICE_ID und reagiert nicht, wenn es mit der falschen DEVICE_ID oder PROTOCOL_VERSION angesprochen wurde.
 
 Auf den Endgeräten werden keine sensitiven Daten dauerhaft gespeichert.
 
