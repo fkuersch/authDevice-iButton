@@ -2,7 +2,10 @@
 
 #define DEVICE_ID 0
 
-#define RELAY_ON_TIME 2000
+#ifndef RELAY_ON_TIME
+#define RELAY_ON_TIME 5000
+#endif
+
 #define LED_ON_TIME 5000
 
 #define PIN_RELAY 10
