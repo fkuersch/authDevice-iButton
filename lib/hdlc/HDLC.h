@@ -21,8 +21,8 @@
 #include <string.h>
 
 #define HDLC_TEMPLATE                                                          \
-        int16_t (&readByte)(void),                                             \
-        void (&writeByte)(uint8_t data),                                       \
+        int16_t (*readByte)(void),                                             \
+        void (*writeByte)(uint8_t data),                                       \
         uint16_t rxBuffLen,                                                    \
         class CRC
 
